@@ -1,3 +1,4 @@
+/// PSX MIPS 32bits Instruction
 pub struct Instruction(pub u32);
 
 impl Instruction {
@@ -7,13 +8,13 @@ impl Instruction {
         op >> 26
     }
 
-    pub fn t(&self) -> u32{
+    pub fn t(&self) -> u32 {
         let Instruction(op) = self;
-        
-        (op>>16) & 0x1f
+
+        (op >> 16) & 0x1f
     }
 
-    pub fn imm(&self) -> u32{
+    pub fn imm(&self) -> u32 {
         let Instruction(op) = self;
 
         op & 0xffff

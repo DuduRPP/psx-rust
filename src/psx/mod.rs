@@ -2,16 +2,20 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::bios::Bios;
-use crate::cpu::Cpu;
-use crate::interconnect::Interconnect;
+mod bios;
+mod cpu;
+mod interconnect;
 
-pub fn run() -> Result<()>{
+use bios::Bios;
+use cpu::Cpu;
+use interconnect::Interconnect;
+
+pub fn run() -> Result<()> {
     let bios = Bios::new(&Path::new("./bios/scph1001.bin"))?;
     let inter = Interconnect::new(bios);
     let mut cpu = Cpu::new(inter);
-    
-    loop{
+
+    loop {
         cpu.run_next_instruction();
     }
 }
