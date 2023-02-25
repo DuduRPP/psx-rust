@@ -9,7 +9,7 @@ pub struct Interconnect {
 }
 
 impl Interconnect {
-    pub fn new(bios: Bios, ram:Ram) -> Interconnect {
+    pub fn new(bios: Bios, ram: Ram) -> Interconnect {
         Interconnect { bios, ram }
     }
 
@@ -25,8 +25,8 @@ impl Interconnect {
             return self.bios.load8(offset);
         }
 
-        if let Some(_) = map::EXPANSION_1.contains(addr){
-            println!("Unhandled load8 at Expansion1 register {:08x}",addr);
+        if let Some(_) = map::EXPANSION_1.contains(addr) {
+            println!("Unhandled load8 at Expansion1 register {:08x}", addr);
             return 0xff;
         }
 
@@ -34,8 +34,8 @@ impl Interconnect {
     }
 
     pub fn load32(&self, addr: u32) -> u32 {
-        if addr % 4 != 0{
-            panic!("Unaligned load32 address {:08x}",addr);
+        if addr % 4 != 0 {
+            panic!("Unaligned load32 address {:08x}", addr);
         }
 
         let addr = map::mask_region(addr);
@@ -44,76 +44,85 @@ impl Interconnect {
             return self.bios.load32(offset);
         }
 
-        if let Some(offset) = map::RAM.contains(addr){
+        if let Some(offset) = map::RAM.contains(addr) {
             return self.ram.load32(offset);
         }
 
         panic!("unhandled fetch32 at address {:08x}", addr);
     }
 
-    pub fn store8(&mut self, addr: u32, val: u8){
+    pub fn store8(&mut self, addr: u32, val: u8) {
         let addr = map::mask_region(addr);
 
-        if let Some(offset) = map::RAM.contains(addr){
+        if let Some(offset) = map::RAM.contains(addr) {
             println!("DEU O STORE");
-            return self.ram.store8(offset,val);
+            return self.ram.store8(offset, val);
         }
-        if let Some(offset) = map::EXPANSION_2.contains(addr){
+        if let Some(offset) = map::EXPANSION_2.contains(addr) {
             println!("Unhandled write byte to Expansion2 register {:x}", offset);
-            return ;
+            return;
         }
 
-        panic!("unhandled store16 into address {:08x}",addr)
+        panic!("unhandled store16 into address {:08x}", addr)
     }
 
-    pub fn store16(&mut self, addr: u32, _val: u16){
-        if addr % 2 != 0{
-            panic!("Unaligned store16 address {:08x}",addr)
+    pub fn store16(&mut self, addr: u32, _val: u16) {
+        if addr % 2 != 0 {
+            panic!("Unaligned store16 address {:08x}", addr)
         }
 
         let addr = map::mask_region(addr);
 
-        if let Some(offset) = map::SPU.contains(addr){
+        if let Some(offset) = map::SPU.contains(addr) {
             println!("Unhandled write half to SPU register {:x}", offset);
-            return ;
+            return;
         }
 
-        panic!("unhandled store16 into address {:08x}",addr)
+        panic!("unhandled store16 into address {:08x}", addr)
     }
 
-    pub fn store32(&mut self, addr: u32, val: u32){
-        if addr % 4 != 0{
-            panic!("Unaligned store32 address {:08x}",addr);
+    pub fn store32(&mut self, addr: u32, val: u32) {
+        if addr % 4 != 0 {
+            panic!("Unaligned store32 address {:08x}", addr);
         }
 
         let addr = map::mask_region(addr);
 
-        if let Some(offset) = map::MEMLCONTROL.contains(addr){
+        if let Some(offset) = map::MEMLCONTROL.contains(addr) {
             match offset {
-                0 => if val != 0x1f000000{
-                    panic!("Bad expansion 1 base address: 0x{:08x}",val);
+                0 => {
+                    if val != 0x1f000000 {
+                        panic!("Bad expansion 1 base address: 0x{:08x}", val);
+                    }
                 }
-                4 => if val != 0x1f802000{
-                    panic!("Bad expansion 2 base address: 0x{:08x}",val);
+                4 => {
+                    if val != 0x1f802000 {
+                        panic!("Bad expansion 2 base address: 0x{:08x}", val);
+                    }
                 }
-                _ => println!("unhandled write MEMLCONTROL register {:08x}",addr)
+                _ => println!("unhandled write MEMLCONTROL register {:08x}", addr),
             }
-            return ;
+            return;
         }
 
-        if let Some(_) = map::RAM_SIZE.contains(addr){
+        if let Some(_) = map::RAM_SIZE.contains(addr) {
             println!("unhandled write RAM_SIZE register");
-            return ; 
+            return;
+        }
+        
+        if let Some(offset) = map::IRQ_CONTROL.contains(addr) {
+            println!("unhandled write IRQ control: {} <- {:08x}",offset,val);
+            return;
         }
 
-        if let Some(offset) = map::RAM.contains(addr){
+        if let Some(offset) = map::RAM.contains(addr) {
             self.ram.store32(offset, val);
-            return ; 
+            return;
         }
 
-        if let Some(_) = map::CACHE_CONTROL.contains(addr){
+        if let Some(_) = map::CACHE_CONTROL.contains(addr) {
             println!("unhandled write CACHE_CONTROL register");
-            return ; 
+            return;
         }
 
         panic!("unhandled store32 at address {:08x}", addr);

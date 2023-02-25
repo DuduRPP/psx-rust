@@ -11,40 +11,40 @@ impl Instruction {
         op >> 26
     }
 
-    pub fn subfunction(&self) -> u32{
+    pub fn subfunction(&self) -> u32 {
         let Instruction(op) = self;
 
         op & 0x3f
     }
 
-    pub fn cop_opcode(&self) -> u32{
+    pub fn cop_opcode(&self) -> u32 {
         let Instruction(op) = self;
 
         (op >> 21) & 0x1f
     }
 
-    pub fn d(&self) -> RegisterIndex{
+    pub fn d(&self) -> RegisterIndex {
         let Instruction(op) = self;
 
         RegisterIndex((op >> 11) & 0x1f)
     }
 
-    pub fn t(&self) -> RegisterIndex{
+    pub fn t(&self) -> RegisterIndex {
         let Instruction(op) = self;
 
         RegisterIndex((op >> 16) & 0x1f)
     }
 
-    pub fn s(&self) -> RegisterIndex{
+    pub fn s(&self) -> RegisterIndex {
         let Instruction(op) = self;
 
         RegisterIndex((op >> 21) & 0x1f)
     }
 
-    pub fn shift_imm(&self) -> u32{
+    pub fn shift_imm(&self) -> u32 {
         let Instruction(op) = self;
 
-        (op>>6) & 0x1f
+        (op >> 6) & 0x1f
     }
 
     pub fn imm(&self) -> u32 {
@@ -61,9 +61,9 @@ impl Instruction {
         v as u32
     }
 
-    pub fn imm_jump(&self) -> u32{
+    pub fn imm_jump(&self) -> u32 {
         let Instruction(op) = self;
 
-        op & 0x3ffffff
+        op & 0x3ff_ffff
     }
 }
