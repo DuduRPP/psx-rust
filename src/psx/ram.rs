@@ -11,6 +11,10 @@ impl Ram{
         Ram { data }
     }
 
+    pub fn load8(&self, offset: u32) -> u8{
+        self.data[offset as usize]
+    }
+
     /// Load little endian value from RAM data buffer
     pub fn load32(&self, offset: u32) -> u32{
         let offset = offset as usize;
@@ -21,6 +25,10 @@ impl Ram{
         let b3 = self.data[offset+3] as u32;
 
         b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+    }
+
+    pub fn store8(&mut self, offset: u32, val: u8){
+        self.data[offset as usize] = val;
     }
 
     /// Strore in RAM data buffer as little endian
@@ -37,5 +45,6 @@ impl Ram{
         self.data[offset + 2] = b2;
         self.data[offset + 3] = b3;
     }
+
 
 }
