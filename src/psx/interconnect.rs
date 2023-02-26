@@ -17,7 +17,6 @@ impl Interconnect {
         let addr = map::mask_region(addr);
 
         if let Some(offset) = map::RAM.contains(addr) {
-            println!("Leu na RAM");
             return self.ram.load8(offset);
         }
 
@@ -47,6 +46,10 @@ impl Interconnect {
         if let Some(offset) = map::RAM.contains(addr) {
             return self.ram.load32(offset);
         }
+        if let Some(offset) = map::IRQ_CONTROL.contains(addr) {
+            println!("unhandled load IRQ control: {}",offset);
+            return 0;
+        }
 
         panic!("unhandled fetch32 at address {:08x}", addr);
     }
@@ -55,7 +58,6 @@ impl Interconnect {
         let addr = map::mask_region(addr);
 
         if let Some(offset) = map::RAM.contains(addr) {
-            println!("DEU O STORE");
             return self.ram.store8(offset, val);
         }
         if let Some(offset) = map::EXPANSION_2.contains(addr) {
@@ -76,6 +78,11 @@ impl Interconnect {
         if let Some(offset) = map::SPU.contains(addr) {
             println!("Unhandled write half to SPU register {:x}", offset);
             return;
+        }
+        
+        if let Some(offset) = map::TIMERS.contains(addr){
+            println!("Unhandled write to time register: {:08x}",offset);
+            return ;
         }
 
         panic!("unhandled store16 into address {:08x}", addr)

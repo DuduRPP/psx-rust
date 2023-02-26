@@ -25,7 +25,16 @@ pub struct Cpu {
     hi: u32,
     lo: u32,
 
+    // COP 0
+    /// Register 12 -Status Register
     sr: u32,
+    /// Register 13 - Cause Register
+    cause: u32,
+    /// Register 14 - EPC
+    epc: u32,
+
+    branch: bool,
+    delay_slot: bool,
 }
 
 impl Cpu {
@@ -41,9 +50,13 @@ impl Cpu {
             inter,
             next_pc: Cpu::RESET_STATE_ADDR + 4,
             load: None,
-            hi: 0xdeadbeef,
-            lo: 0xdeadbeef,
+            hi: 0,
+            lo: 0,
             sr: 0,
+            cause: 0,
+            epc: 0,
+            branch: false,
+            delay_slot: false,
         }
     }
 
@@ -63,6 +76,9 @@ impl Cpu {
         self.next_pc = self.pc.wrapping_add(4);
 
         let instruction = Instruction(self.load32(self.curr_pc));
+
+        self.delay_slot = self.branch;
+        self.branch     = false;
 
         self.decode_and_execute(instruction);
     }
@@ -108,6 +124,7 @@ impl Cpu {
                 0b000000 => self.op_sll(instruction),
                 0b000010 => self.op_srl(instruction),
                 0b000011 => self.op_sra(instruction),
+                0b001100 => self.op_syscall(instruction),
                 0b001000 => self.op_jr(instruction),
                 0b001001 => self.op_jalr(instruction),
                 0b010000 => self.op_mfhi(instruction),
@@ -168,10 +185,36 @@ impl Cpu {
         self.load = Some((new_load_reg, new_v))
     }
 
+    /// Triggers Exceptions
+    fn exception(&mut self, cause:Exception){
+        let handler: u32 = match self.sr & (1<<22) != 0{
+            true => 0xbfc00180,
+            false => 0x80000080,
+        };
+
+        let mode = self.sr & 0x3f;
+        self.sr &= !0x3f;
+        self.sr |= (mode << 2) & 0x3f;
+
+        self.cause = (cause as u32) << 2;
+
+        self.epc = self.curr_pc;
+
+        if self.delay_slot{
+            self.epc = self.epc.wrapping_sub(4);
+            self.cause |= 1 << 31;
+        }
+
+        self.pc      = handler;
+        self.next_pc = self.pc.wrapping_add(4);
+
+    }
+
     fn op_cop0(&mut self, instruction: Instruction) {
         match instruction.cop_opcode() {
             0b00000 => self.op_mfc0(instruction),
             0b00100 => self.op_mtc0(instruction),
+            0b10000 => self.op_rfe(instruction),
             _ => panic!("Unhandled instruction {:x}", instruction.0),
         }
     }
@@ -181,14 +224,15 @@ impl Cpu {
         let offset = offset << 2;
 
         self.next_pc = self.pc.wrapping_add(offset);
+        self.branch  = true;
     }
 
     /// Decider between bltz, bgez, bltzal, bgezal
     fn op_bxx(&mut self, instruction: Instruction){
-        let i = instruction.imm();
+        let i = instruction.imm_se();
         let s = instruction.s();
 
-        let is_link = ((instruction.0 >> 20) & 1) != 0;
+        let is_link = ((instruction.0 >> 17) & 0xf) == 0x8;
         let is_greater = (instruction.0 >> 16) & 1;
         
         let v = self.reg(s) as i32;
@@ -201,12 +245,12 @@ impl Cpu {
 
         self.handle_load_delay();
 
-        if test != 0{
-            if is_link{
-                let ra = self.next_pc;
-                self.set_reg(RegisterIndex(31),ra);
-            }
+        if is_link{
+            let ra = self.next_pc;
+            self.set_reg(RegisterIndex(31),ra);
+        }
 
+        if test != 0{
             self.branch(i);
         }
     }
@@ -301,10 +345,14 @@ impl Cpu {
 
         let addr = self.reg(s).wrapping_add(i);
         let v = self.reg(t);
+        if addr % 2 == 0 {
+            self.handle_load_delay();
 
-        self.handle_load_delay();
+            self.store16(addr, v as u16);
+        } else {
+            self.exception(Exception::StoreAddressError);
+        }
 
-        self.store16(addr, v as u16);
     }
 
     fn op_sw(&mut self, instruction: Instruction) {
@@ -319,10 +367,13 @@ impl Cpu {
 
         let addr = self.reg(s).wrapping_add(i);
         let v = self.reg(t);
+        if addr % 4 == 0{
+            self.handle_load_delay();
 
-        self.handle_load_delay();
-
-        self.store32(addr, v);
+            self.store32(addr, v);
+        } else {
+            self.exception(Exception::StoreAddressError);
+        }
     }
 
     fn op_lb(&mut self, instruction: Instruction) {
@@ -360,10 +411,13 @@ impl Cpu {
         let s = instruction.s();
 
         let addr = self.reg(s).wrapping_add(i);
+        if addr % 4 == 0{
+            let v = self.load32(addr);
 
-        let v = self.load32(addr);
-
-        self.handle_load_delay_chain(t, v);
+            self.handle_load_delay_chain(t, v);
+        } else {
+            self.exception(Exception::LoadAddressError);
+        }
     }
 
     fn op_sra(&mut self, instruction: Instruction) {
@@ -461,14 +515,12 @@ impl Cpu {
         let s = self.reg(s) as i32;
         let t = self.reg(t) as i32;
 
-        let v = match s.checked_add(t) {
-            Some(v) => v as u32,
-            None => panic!("ADDI overflow"),
-        };
-
         self.handle_load_delay();
 
-        self.set_reg(d, v)
+        match s.checked_add(t) {
+            Some(v) => self.set_reg(d, v as u32),
+            None => self.exception(Exception::Overflow),
+        };
     }
 
     fn op_addi(&mut self, instruction: Instruction) {
@@ -478,14 +530,12 @@ impl Cpu {
 
         let s = self.reg(s) as i32;
 
-        let v = match s.checked_add(i) {
-            Some(v) => v as u32,
-            None => panic!("ADDI overflow"),
-        };
-
         self.handle_load_delay();
-
-        self.set_reg(t, v)
+        
+        match s.checked_add(i) {
+            Some(v) => self.set_reg(t, v as u32),
+            None    => self.exception(Exception::Overflow),
+        };
     }
 
     fn op_addiu(&mut self, instruction: Instruction) {
@@ -605,6 +655,7 @@ impl Cpu {
         let i = instruction.imm_jump();
 
         self.next_pc = (self.pc & 0xf000_0000) | (i << 2);
+        self.branch  = true;
 
         self.handle_load_delay();
     }
@@ -622,6 +673,7 @@ impl Cpu {
         let s = instruction.s();
 
         self.next_pc = self.reg(s);
+        self.branch  = true;
 
         self.handle_load_delay();
     }
@@ -630,8 +682,9 @@ impl Cpu {
         let d = instruction.d();
         let s = instruction.s();
 
-        let ra = self.next_pc;
+        let ra       = self.next_pc;
         self.next_pc = self.reg(s);
+        self.branch  = true;
 
         self.set_reg(d, ra);
     }
@@ -686,6 +739,10 @@ impl Cpu {
         self.handle_load_delay();
     }
 
+    fn op_syscall(&mut self, instruction: Instruction){
+        self.exception(Exception::SysCall);
+    }
+
     fn op_mtc0(&mut self, instruction: Instruction) {
         let cpu_r = instruction.t();
         let cop_r = instruction.d();
@@ -716,12 +773,37 @@ impl Cpu {
 
         let v = match cop_r {
             12 => self.sr,
-            13 => panic!("Unhandled CAUSE register"),
+            13 => self.cause,
+            14 => self.epc,
             _ => panic!("Unhandled cop0 register {:08x}", cop_r),
         };
 
         self.handle_load_delay_chain(cpu_r, v);
     }
+
+    /// Return from exception
+    fn op_rfe(&mut self, instruction: Instruction){
+        if instruction.0 & 0x3f != 0b010000{
+            panic!("Invalid cop0 instruction: {}",instruction.0);
+        }
+
+        let mode = self.sr & 0x3f;
+        self.sr &= !0x3f;
+        self.sr |= mode >> 2;
+    }
+}
+
+/// Exception types stored in CAUSE register (cop0 - $13)
+enum Exception {
+    /// Address error on load
+    LoadAddressError = 0x4,
+    /// Address error on store
+    StoreAddressError = 0x5,
+    /// System Call Exception
+    SysCall = 0x8,
+    /// Overflow Exception
+    Overflow = 0xc,
+
 }
 
 pub mod map {
@@ -757,6 +839,9 @@ pub mod map {
 
     /// Interrupt Control registers
     pub const IRQ_CONTROL: Range = Range(0x1f801070, 8);
+
+    /// Timers registers
+    pub const TIMERS: Range = Range(0x1f801100, 52);
 
     /// Sound registers
     pub const SPU: Range = Range(0x1f801c00, 640);
