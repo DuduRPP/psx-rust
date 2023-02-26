@@ -72,6 +72,12 @@ impl Cpu {
 
     pub fn run_next_instruction(&mut self) {
         self.curr_pc = self.pc;
+
+        if self.curr_pc % 4 != 0{
+            self.exception(Exception::LoadAddressError);
+            return ;
+        }
+
         self.pc = self.next_pc;
         self.next_pc = self.pc.wrapping_add(4);
 
@@ -85,6 +91,10 @@ impl Cpu {
 
     fn load8(&self, addr: u32) -> u8 {
         self.inter.load8(addr)
+    }
+
+    fn load16(&self, addr: u32) -> u16{
+        self.inter.load16(addr)
     }
 
     fn load32(&self, addr: u32) -> u32 {
@@ -124,23 +134,32 @@ impl Cpu {
                 0b000000 => self.op_sll(instruction),
                 0b000010 => self.op_srl(instruction),
                 0b000011 => self.op_sra(instruction),
+                0b000100 => self.op_sllv(instruction),
+                0b000110 => self.op_srlv(instruction),
+                0b000111 => self.op_srav(instruction),
                 0b001100 => self.op_syscall(instruction),
+                0b001101 => self.op_break(instruction),
                 0b001000 => self.op_jr(instruction),
                 0b001001 => self.op_jalr(instruction),
                 0b010000 => self.op_mfhi(instruction),
                 0b010001 => self.op_mthi(instruction),
                 0b010010 => self.op_mflo(instruction),
                 0b010011 => self.op_mtlo(instruction),
+                0b011000 => self.op_mult(instruction),
+                0b011001 => self.op_multu(instruction),
                 0b011010 => self.op_div(instruction),
                 0b011011 => self.op_divu(instruction),
                 0b100000 => self.op_add(instruction),
                 0b100001 => self.op_addu(instruction),
+                0b100010 => self.op_sub(instruction),
                 0b100011 => self.op_subu(instruction),
                 0b100100 => self.op_and(instruction),
                 0b100101 => self.op_or(instruction),
+                0b100110 => self.op_xor(instruction),
+                0b100111 => self.op_nor(instruction),
                 0b101010 => self.op_slt(instruction),
                 0b101011 => self.op_sltu(instruction),
-                _ => panic!("Unhandled instruction {:x}", instruction.0),
+                _        => self.op_illegal(instruction),
             },
             0b000001 => self.op_bxx(instruction),
             0b000010 => self.op_j(instruction),
@@ -149,21 +168,39 @@ impl Cpu {
             0b000101 => self.op_bne(instruction),
             0b000110 => self.op_blez(instruction),
             0b000111 => self.op_bgtz(instruction),
-            0b001101 => self.op_ori(instruction),
             0b001000 => self.op_addi(instruction),
             0b001001 => self.op_addiu(instruction),
             0b001010 => self.op_slti(instruction),
             0b001011 => self.op_sltiu(instruction),
             0b001100 => self.op_andi(instruction),
+            0b001101 => self.op_ori(instruction),
+            0b001110 => self.op_xori(instruction),
             0b001111 => self.op_lui(instruction),
             0b010000 => self.op_cop0(instruction),
+            0b010001 => self.op_cop1(instruction),
+            0b010010 => self.op_cop2(instruction),
+            0b010011 => self.op_cop3(instruction),
             0b100000 => self.op_lb(instruction),
+            0b100001 => self.op_lh(instruction),
+            0b100010 => self.op_lwl(instruction),
             0b100011 => self.op_lw(instruction),
             0b100100 => self.op_lbu(instruction),
+            0b100101 => self.op_lhu(instruction),
+            0b100110 => self.op_lwr(instruction),
             0b101000 => self.op_sb(instruction),
             0b101001 => self.op_sh(instruction),
+            0b101010 => self.op_swl(instruction),
             0b101011 => self.op_sw(instruction),
-            _ => panic!("Unhandled instruction {:x}", instruction.0),
+            0b101110 => self.op_swr(instruction),
+            0b110000 => self.op_lwc0(instruction),
+            0b110001 => self.op_lwc1(instruction),
+            0b110010 => self.op_lwc2(instruction),
+            0b110011 => self.op_lwc3(instruction),
+            0b111000 => self.op_swc0(instruction),
+            0b111001 => self.op_swc1(instruction),
+            0b111010 => self.op_swc2(instruction),
+            0b111011 => self.op_swc3(instruction),
+            _        => self.op_illegal(instruction),
         }
     }
 
@@ -217,6 +254,18 @@ impl Cpu {
             0b10000 => self.op_rfe(instruction),
             _ => panic!("Unhandled instruction {:x}", instruction.0),
         }
+    }
+
+    fn op_cop1(&mut self, _:Instruction){
+        self.exception(Exception::CoprocessorError);
+    }
+
+    fn op_cop2(&mut self, instruction:Instruction){
+        panic!("unhandled GTE instruction {}",instruction.0);
+    }
+
+    fn op_cop3(&mut self, _:Instruction){
+        self.exception(Exception::CoprocessorError);
     }
 
     /// Branch with relative immediate offset
@@ -278,12 +327,48 @@ impl Cpu {
         self.set_reg(t, v)
     }
 
+    fn op_xori(&mut self, instruction: Instruction) {
+        let i = instruction.imm();
+        let t = instruction.t();
+        let s = instruction.s();
+
+        let v = self.reg(s) ^ i;
+
+        self.handle_load_delay();
+
+        self.set_reg(t, v)
+    }
+
     fn op_or(&mut self, instruction: Instruction) {
         let d = instruction.d();
         let s = instruction.s();
         let t = instruction.t();
 
         let v = self.reg(s) | self.reg(t);
+
+        self.handle_load_delay();
+
+        self.set_reg(d, v)
+    }
+
+    fn op_xor(&mut self, instruction: Instruction) {
+        let d = instruction.d();
+        let s = instruction.s();
+        let t = instruction.t();
+
+        let v = self.reg(s) ^ self.reg(t);
+
+        self.handle_load_delay();
+
+        self.set_reg(d, v)
+    }
+
+    fn op_nor(&mut self, instruction: Instruction){
+        let d = instruction.d();
+        let s = instruction.s();
+        let t = instruction.t();
+
+        let v = !(self.reg(s) | self.reg(t));
 
         self.handle_load_delay();
 
@@ -355,6 +440,34 @@ impl Cpu {
 
     }
 
+    fn op_swl(&mut self, instruction: Instruction) {
+        if self.sr & 0x10000 != 0 {
+            println!("ignoring load while cache is isolated");
+            return;
+        }
+
+        let i = instruction.imm_se();
+        let t = instruction.t();
+        let s = instruction.s();
+
+        let addr = self.reg(s).wrapping_add(i);
+        let v = self.reg(t);
+
+        let aligned_addr = addr & !3;
+
+        let cur_mem = self.load32(aligned_addr);
+
+        let mem = match addr & 3{
+            0 => (cur_mem & 0xffffff00) | (v >> 24),
+            1 => (cur_mem & 0xffff0000) | (v >> 16),
+            2 => (cur_mem & 0xff000000) | (v >> 8),
+            3 => (cur_mem & 0x00000000) | (v >> 0),
+            _ => unreachable!(),
+        };
+
+        self.store32(addr, mem);
+    }
+
     fn op_sw(&mut self, instruction: Instruction) {
         if self.sr & 0x10000 != 0 {
             println!("ignoring store while cache is isolated");
@@ -374,6 +487,34 @@ impl Cpu {
         } else {
             self.exception(Exception::StoreAddressError);
         }
+    }
+
+    fn op_swr(&mut self, instruction: Instruction) {
+        if self.sr & 0x10000 != 0 {
+            println!("ignoring load while cache is isolated");
+            return;
+        }
+
+        let i = instruction.imm_se();
+        let t = instruction.t();
+        let s = instruction.s();
+
+        let addr = self.reg(s).wrapping_add(i);
+        let v = self.reg(t);
+
+        let aligned_addr = addr & !3;
+
+        let cur_mem = self.load32(aligned_addr);
+
+        let mem = match addr & 3{
+            0 => (cur_mem & 0x00000000) | (v << 0),
+            1 => (cur_mem & 0x000000ff) | (v << 8),
+            2 => (cur_mem & 0x0000ffff) | (v << 16),
+            3 => (cur_mem & 0x00ffffff) | (v << 24),
+            _ => unreachable!(),
+        };
+
+        self.store32(addr, mem);
     }
 
     fn op_lb(&mut self, instruction: Instruction) {
@@ -398,6 +539,104 @@ impl Cpu {
         let v = self.load8(addr);
 
         self.handle_load_delay_chain(t, v as u32);
+    }
+
+    fn op_lh(&mut self, instruction: Instruction){
+        let i = instruction.imm_se();
+        let t = instruction.t();
+        let s = instruction.s();
+
+        let addr = self.reg(s).wrapping_add(i);
+
+        if addr % 2 == 0{
+            let v = self.load16(addr) as i16;
+            self.handle_load_delay_chain(t, v as u32);
+        } else {
+            self.exception(Exception::LoadAddressError);
+        }
+    }
+
+    fn op_lhu(&mut self, instruction: Instruction){
+        let i = instruction.imm_se();
+        let t = instruction.t();
+        let s = instruction.s();
+
+        let addr = self.reg(s).wrapping_add(i);
+
+        if addr % 2 == 0{
+            let v = self.load16(addr);
+            self.handle_load_delay_chain(t, v as u32);
+        } else {
+            self.exception(Exception::LoadAddressError);
+        }
+    }
+
+    fn op_lwl(&mut self, instruction: Instruction) {
+        if self.sr & 0x10000 != 0 {
+            println!("ignoring load while cache is isolated");
+            return;
+        }
+
+        let i = instruction.imm_se();
+        let t = instruction.t();
+        let s = instruction.s();
+
+        let addr = self.reg(s).wrapping_add(i);
+
+        let mut cur_v = self.reg(t);
+
+        if let Some((reg,value)) = self.load{
+            if reg == t{
+                cur_v = value;
+            }
+        }
+
+        let aligned_addr = addr & !3;
+        let aligned_word = self.load32(aligned_addr);
+
+        let v = match addr & 3{
+            0 => (cur_v & 0x00ffffff) | (aligned_word << 24),
+            1 => (cur_v & 0x0000ffff) | (aligned_word << 16),
+            2 => (cur_v & 0x000000ff) | (aligned_word << 8),
+            3 => (cur_v & 0x00000000) | (aligned_word << 0),
+            _ => unreachable!(),
+        };
+
+        self.handle_load_delay_chain(t, v);
+    }
+
+    fn op_lwr(&mut self, instruction: Instruction) {
+        if self.sr & 0x10000 != 0 {
+            println!("ignoring load while cache is isolated");
+            return;
+        }
+
+        let i = instruction.imm_se();
+        let t = instruction.t();
+        let s = instruction.s();
+
+        let addr = self.reg(s).wrapping_add(i);
+
+        let mut cur_v = self.reg(t);
+
+        if let Some((reg,value)) = self.load{
+            if reg == t{
+                cur_v = value;
+            }
+        }
+
+        let aligned_addr = addr & !3;
+        let aligned_word = self.load32(aligned_addr);
+
+        let v = match addr & 3{
+            0 => (cur_v & 0x00000000) | (aligned_word >> 0),
+            1 => (cur_v & 0xff000000) | (aligned_word << 8),
+            2 => (cur_v & 0xffff0000) | (aligned_word << 16),
+            3 => (cur_v & 0xffffff00) | (aligned_word << 24),
+            _ => unreachable!(),
+        };
+
+        self.handle_load_delay_chain(t, v);
     }
 
     fn op_lw(&mut self, instruction: Instruction) {
@@ -444,6 +683,42 @@ impl Cpu {
         self.set_reg(d, v)
     }
 
+    fn op_sllv(&mut self, instruction: Instruction){
+        let s = instruction.s();
+        let t = instruction.t();
+        let d = instruction.d();
+
+        let v = self.reg(t) << (self.reg(s) & 0x1F);
+
+        self.handle_load_delay();
+
+        self.set_reg(d, v)
+    }
+
+    fn op_srav(&mut self, instruction: Instruction){
+        let s = instruction.s();
+        let t = instruction.t();
+        let d = instruction.d();
+
+        let v = (self.reg(t) as i32) >> (self.reg(s) & 0x1f);
+
+        self.handle_load_delay();
+
+        self.set_reg(d, v as u32);
+    }
+
+    fn op_srlv(&mut self, instruction: Instruction){
+        let s = instruction.s();
+        let t = instruction.t();
+        let d = instruction.d();
+
+        let v = self.reg(t) >> (self.reg(s) & 0x1F);
+
+        self.handle_load_delay();
+
+        self.set_reg(d, v)
+    }
+
     fn op_srl(&mut self, instruction: Instruction) {
         let i = instruction.shift_imm();
         let t = instruction.t();
@@ -457,11 +732,11 @@ impl Cpu {
     }
 
     fn op_slti(&mut self, instruction: Instruction){
-        let i = instruction.imm();
+        let i = instruction.imm_se() as i32;
         let s = instruction.s();
         let t = instruction.t();
 
-        let v = (self.reg(s) as i32) << i;
+        let v = (self.reg(s) as i32) < i;
 
         self.handle_load_delay();
 
@@ -562,6 +837,22 @@ impl Cpu {
         self.set_reg(d, v)
     }
 
+    fn op_sub(&mut self, instruction: Instruction) {
+        let d = instruction.d();
+        let t = instruction.t();
+        let s = instruction.s();
+
+        let s = self.reg(s) as i32;
+        let t = self.reg(t) as i32;
+
+        self.handle_load_delay();
+
+        match s.checked_sub(t){
+            Some(v) => self.set_reg(d, v as u32),
+            None    => self.exception(Exception::Overflow),
+        }
+    }
+
     fn op_subu(&mut self, instruction: Instruction) {
         let d = instruction.d();
         let t = instruction.t();
@@ -572,6 +863,38 @@ impl Cpu {
         self.handle_load_delay();
 
         self.set_reg(d, v)
+    }
+
+    fn op_mult(&mut self, instruction: Instruction){
+        let s = instruction.s();
+        let t = instruction.t();
+
+        let a = (self.reg(s) as i32) as i64;
+        let b = (self.reg(t) as i32) as i64;
+
+        let v = (a * b) as u64;
+
+        self.handle_load_delay();
+
+        self.hi = (v >> 32) as u32;
+        self.lo = v as u32;
+
+    }
+
+    fn op_multu(&mut self, instruction: Instruction){
+        let s = instruction.s();
+        let t = instruction.t();
+
+        let a = self.reg(s) as u64;
+        let b = self.reg(t) as u64;
+
+        let v = a * b;
+
+        self.handle_load_delay();
+
+        self.hi = (v >> 32) as u32;
+        self.lo = v as u32;
+
     }
 
     fn op_div(&mut self, instruction: Instruction){
@@ -739,8 +1062,12 @@ impl Cpu {
         self.handle_load_delay();
     }
 
-    fn op_syscall(&mut self, instruction: Instruction){
+    fn op_syscall(&mut self, _instruction: Instruction){
         self.exception(Exception::SysCall);
+    }
+
+    fn op_break(&mut self, _instruction: Instruction){
+        self.exception(Exception::Break);
     }
 
     fn op_mtc0(&mut self, instruction: Instruction) {
@@ -781,6 +1108,32 @@ impl Cpu {
         self.handle_load_delay_chain(cpu_r, v);
     }
 
+    fn op_lwc0(&mut self, _instruction: Instruction){
+        self.exception(Exception::CoprocessorError);
+    }
+    fn op_lwc1(&mut self, _instruction: Instruction){
+        self.exception(Exception::CoprocessorError);
+    }
+    fn op_lwc2(&mut self, instruction: Instruction){
+        panic!("Unhandled GTE LWC: {}",instruction.0);
+    }
+    fn op_lwc3(&mut self, _instruction: Instruction){
+        self.exception(Exception::CoprocessorError);
+    }
+
+    fn op_swc0(&mut self, _instruction: Instruction){
+        self.exception(Exception::CoprocessorError);
+    }
+    fn op_swc1(&mut self, _instruction: Instruction){
+        self.exception(Exception::CoprocessorError);
+    }
+    fn op_swc2(&mut self, instruction: Instruction){
+        panic!("Unhandled GTE SWC: {}",instruction.0);
+    }
+    fn op_swc3(&mut self, _instruction: Instruction){
+        self.exception(Exception::CoprocessorError);
+    }
+
     /// Return from exception
     fn op_rfe(&mut self, instruction: Instruction){
         if instruction.0 & 0x3f != 0b010000{
@@ -790,6 +1143,11 @@ impl Cpu {
         let mode = self.sr & 0x3f;
         self.sr &= !0x3f;
         self.sr |= mode >> 2;
+    }
+
+    fn op_illegal(&mut self, instruction: Instruction){
+        println!("Illegal Instruction {} !",instruction.0);
+        self.exception(Exception::IllegalInstruction);
     }
 }
 
@@ -801,6 +1159,12 @@ enum Exception {
     StoreAddressError = 0x5,
     /// System Call Exception
     SysCall = 0x8,
+    /// Break Exception
+    Break = 0x9,
+    /// Illegal Instruction
+    IllegalInstruction = 0xa,
+    /// Unsuported coprecessor operation
+    CoprocessorError = 0xb,
     /// Overflow Exception
     Overflow = 0xc,
 
@@ -840,8 +1204,14 @@ pub mod map {
     /// Interrupt Control registers
     pub const IRQ_CONTROL: Range = Range(0x1f801070, 8);
 
+    /// DMA (Direct Memory Access) registers
+    pub const DMA: Range = Range(0x1f801080,0x80);
+
     /// Timers registers
     pub const TIMERS: Range = Range(0x1f801100, 52);
+
+    /// GPU registers
+    pub const GPU: Range = Range(0x1f801810, 8);
 
     /// Sound registers
     pub const SPU: Range = Range(0x1f801c00, 640);
