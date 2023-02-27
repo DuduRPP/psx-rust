@@ -388,7 +388,6 @@ impl Cpu {
     }
 
     fn op_and(&mut self, instruction: Instruction) {
-        println!("AND");
         let d = instruction.d();
         let t = instruction.t();
         let s = instruction.s();

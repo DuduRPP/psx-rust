@@ -6,17 +6,19 @@ mod bios;
 mod cpu;
 mod interconnect;
 mod ram;
+mod dma;
 
 use bios::Bios;
 use cpu::Cpu;
 use interconnect::Interconnect;
 
-use self::ram::Ram;
+use self::{ram::Ram, dma::Dma};
 
 pub fn run() -> Result<()> {
     let bios = Bios::new(&Path::new("./bios/scph1001.bin"))?;
     let ram = Ram::new();
-    let inter = Interconnect::new(bios, ram);
+    let dma  = Dma::new();
+    let inter = Interconnect::new(bios, ram, dma);
     let mut cpu = Cpu::new(inter);
 
     loop {
